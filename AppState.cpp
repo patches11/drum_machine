@@ -3,7 +3,8 @@
 
 Pattern     pattern;
 GlobalState globalState;
-AppMode     appMode = MODE_HOME;
+AppMode     appMode = MODE_PATTERN_EDIT;   // boot straight into editing (M3)
+EditState   editState;
 
 void appStateInit() {
   memset(&pattern, 0, sizeof(pattern));
@@ -34,5 +35,9 @@ void appStateInit() {
   globalState.currentPattern = 0;
   globalState.volume         = 6;
 
-  appMode = MODE_HOME;
+  appMode = MODE_PATTERN_EDIT;
+
+  editState.cursor      = 0;
+  editState.voice       = 0;
+  editState.octaveShift = 0;
 }

@@ -1,7 +1,7 @@
 #include <Audio.h>
 #include <Wire.h>
 #include "AudioEngine.h"
-#include "RawSamplePlayer.h"
+#include "ResamplingPlayer.h"
 #include "SampleStore.h"
 
 AudioEngineClass AudioEngine;
@@ -9,7 +9,7 @@ AudioEngineClass AudioEngine;
 // ---------------------------------------------------------------------------
 // Graph objects (static — Teensy Audio objects must outlive everything)
 
-static RawSamplePlayer          players[NUM_VOICES];
+static ResamplingPlayer         players[NUM_VOICES];
 static AudioEffectEnvelope      envelopes[NUM_VOICES];
 static AudioFilterStateVariable filters[NUM_VOICES];
 static AudioMixer4              mixer;
@@ -90,9 +90,12 @@ void AudioEngineClass::trigger(uint8_t v, uint8_t velocity, int8_t stepPitch) {
     }
   }
 
-  // (void)stepPitch until M4 — ResamplingPlayer will turn this into
-  // playbackRate = 2^((stepPitch + rootSemis)/12) * 2^(fineCents/1200)
-  (void)stepPitch;
+  // pitch ratio = played semitones (key/step) + per-voice tune (spec §7).
+  // powf stays here in the control loop, never in the audio ISR.
+  float semis = (float)stepPitch + (float)vc.rootSemis;
+  float ratio = powf(2.0f, semis / 12.0f)
+              * powf(2.0f, (float)vc.fineCents / 1200.0f);
+  players[v].setPlaybackRate(ratio);
 
   // velocity -> mixer gain: perceptual (squared) curve x per-voice level
   float gv = (float)velocity / 127.0f;

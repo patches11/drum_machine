@@ -55,9 +55,17 @@ enum AppMode : uint8_t {
   APP_MODE_COUNT
 };
 
+// Editing context (cursor position, selected voice) — UI state, not saved.
+struct EditState {
+  uint8_t cursor;       // step column 0..NUM_STEPS-1
+  uint8_t voice;        // selected voice row 0..NUM_VOICES-1
+  int8_t  octaveShift;  // -1/0/+1 octaves applied to key entry (M4)
+};
+
 extern Pattern     pattern;
 extern GlobalState globalState;
 extern AppMode     appMode;
+extern EditState   editState;
 
 // Reset everything to power-on defaults (called before EEPROM/SD restore).
 void appStateInit();

@@ -9,9 +9,9 @@
 //   mixer -> mono out (same signal to both I2S channels)
 //   (master compressor/limiter inserts at M8; FX sends optional later)
 //
-// M1 note: the players are RawSamplePlayer (fixed pitch). At M4 they are
-// replaced by ResamplingPlayer and trigger() gains real pitch handling —
-// its signature already carries stepPitch for that reason.
+// M4: voices are ResamplingPlayer (resampling_player_spec.md) — trigger()
+// computes playbackRate = 2^((stepPitch + rootSemis)/12) * 2^(fineCents/1200)
+// and the player folds in the sample-rate correction.
 
 #include <stdint.h>
 #include "Config.h"
@@ -21,8 +21,8 @@ class AudioEngineClass {
 public:
   void begin();
 
-  // Fire a voice. velocity 0..127; stepPitch in semitones (ignored until M4).
-  // Handles choke groups per resampling_player_spec.md §7.
+  // Fire a voice. velocity 0..127; stepPitch in semitones from the key/step.
+  // Handles pitch + choke groups per resampling_player_spec.md §7.
   void trigger(uint8_t voice, uint8_t velocity, int8_t stepPitch);
 
   // Push a voice's level/decay/filterCut from AppState into the graph

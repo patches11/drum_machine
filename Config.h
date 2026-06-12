@@ -29,6 +29,13 @@
 #define OLED_I2C_ADDR     0x3C    // try 0x3D if init fails
 #define I2C_CLOCK_HZ      400000  // set AFTER sgtl5000.enable()
 
+// --- OLED redraw gating ------------------------------------------------------
+// display.display() blocks ~23 ms (measured by tests/test_oled). A redraw
+// must never start when a sequencer step is due within that window + margin.
+#define OLED_REDRAW_GATE_US  30000  // min time-to-next-step to start a redraw
+#define OLED_MIN_REDRAW_MS   50     // redraw rate limit
+#define OLED_FLASH_MS        900    // flash-message duration
+
 // --- WS2812 LED grid (16 steps x 4 voices) ----------------------------------
 // WS2812Serial: DMA-driven, does NOT disable interrupts (NeoPixel would
 // glitch audio). Pin 8 = Serial3 TX on Teensy 3.6.
@@ -40,6 +47,9 @@
 // for that strip use WS2812_GRBW and 4 bytes/LED. Confirm with tests/test_leds.
 #define LED_CONFIG        WS2812_GRB
 #define LED_BYTES_PER_LED 3
+// 0 = row-major wiring; 1 = serpentine (odd rows reversed). Set after
+// building the grid — tests/test_leds Phase 4 shows which one you have.
+#define LED_SERPENTINE    0
 
 // --- Rotary encoders (A, B) --------------------------------------------------
 #define ENC1_A 24
