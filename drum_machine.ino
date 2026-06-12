@@ -4,7 +4,7 @@
 // Wiring only: setup() initializes modules, loop() pumps them.
 // All logic lives in the module .h/.cpp files. Specs in the .md docs.
 //
-// Milestone status: M6 (lookahead scheduler — groove is now audible).
+// Milestone status: M7 (mic sampling — record, trim, normalize, sequence).
 //   The old hardware-test-rig sketch is preserved at tests/test_rig/.
 //
 // Serial commands (115200) — the editing commands call the SAME Controls
@@ -34,6 +34,8 @@
 //   j J  : voice push/pull -1 / +1 ms
 //   n N  : step nudge -1 / +1 ms
 //   h H  : humanize -1 / +1 ms
+//   q    : sampler arm / cancel / stop  (RECORD mode; = Accent button there)
+//   i I  : mic gain -2 / +2 dB
 //   1..4 : trigger voice 1-4 manually at full velocity
 //   a    : trigger ALL voices (headroom test)
 //   +/-  : master volume (1..10)
@@ -52,6 +54,7 @@
 #include "Encoders.h"
 #include "Controls.h"
 #include "Display.h"
+#include "Sampler.h"
 
 static bool ledsDirty = true;
 
@@ -133,13 +136,14 @@ void setup() {
   appStateInit();
   SampleStore.begin();
   AudioEngine.begin();
+  Sampler.begin();               // mic chain (codec set up by AudioEngine)
   Display.begin();               // AFTER AudioEngine: codec owns I2C init
   Leds.begin();
   InputMatrix.begin();
   Encoders.begin();
   Sequencer.begin(&INTERNAL_CLOCK);
 
-  Serial.println("=== drum machine (M6) ===");
+  Serial.println("=== drum machine (M7) ===");
   Serial.print("Kit:");
   for (uint8_t v = 0; v < NUM_VOICES; v++) {
     Serial.print(" ");
@@ -151,6 +155,7 @@ void setup() {
   Serial.println("p=play m=mode d=demo x=clear [ ]=tempo ,.=cursor v=voice <>=vel k=key");
   Serial.println("A=accent o=oct ()=pitch rR=tune fF=fine s=smpl gG=lvl eE=dcy cC=filt");
   Serial.println("wW=swing b=subdiv yY=accboost jJ=push nN=nudge hH=human 1-4 a +/- u z");
+  Serial.println("q=rec-arm iI=micgain (sampling: m to RECORD mode, q, make a sound)");
 }
 
 void handleSerial() {
@@ -227,6 +232,20 @@ void handleSerial() {
       Serial.print(globalState.humanize); Serial.println("ms");
       break;
 
+    // --- M7 sampling bridge ---
+    case 'q':
+      if (appMode != MODE_SAMPLE_RECORD) {
+        Serial.println("not in RECORD mode - press m until RECORD first");
+      } else {
+        Sampler.toggleArm();   // prints its own state changes
+      }
+      break;
+    case 'i': case 'I':
+      Controls.actionAdjustMicGain(cmd == 'i' ? -2 : +2);
+      Serial.print("mic gain ");
+      Serial.print(globalState.micGain); Serial.println("dB");
+      break;
+
     case '1': case '2': case '3': case '4':
       AudioEngine.trigger(cmd - '1', 127, 0);
       break;
@@ -254,10 +273,13 @@ void loop() {
   InputMatrix.scan();
   Controls.update();
   handleSerial();
+  Sampler.update();              // drain record queue + input level meter
   if (Controls.consumeDirty()) {
     ledsDirty = true;
     Display.markDirty();
   }
+  if (appMode == MODE_SAMPLE_RECORD) Display.markDirty();  // live meter
+                                     // (update() still rate-limits + gates)
 
   // 3. Feedback. LED show() is DMA — safe anytime. The OLED transfer
   //    blocks ~23 ms, so Display.update() self-gates against the sequencer.

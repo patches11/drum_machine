@@ -55,6 +55,8 @@ void AudioEngineClass::begin() {
   sgtl5000.enable();
   Wire.setClock(I2C_CLOCK_HZ);   // after enable() — proven on the test rig
   setVolume(globalState.volume);
+  sgtl5000.inputSelect(AUDIO_INPUT_MIC);     // M7: Sampler records the mic
+  sgtl5000.micGain(globalState.micGain);
   delay(500);
 
   for (uint8_t v = 0; v < NUM_VOICES; v++) {
@@ -123,6 +125,12 @@ void AudioEngineClass::setVolume(uint8_t vol) {
   // Headphone: 0.1..1.0. Line out (PAM8302): 31 (quietest) .. 13 (loudest).
   sgtl5000.volume((float)vol * 0.1f);
   sgtl5000.lineOutLevel(31 - (vol - 1) * 2);
+}
+
+void AudioEngineClass::setMicGain(uint8_t gainDb) {
+  if (gainDb > 63) gainDb = 63;
+  globalState.micGain = gainDb;
+  sgtl5000.micGain(gainDb);
 }
 
 void AudioEngineClass::printUsage() {

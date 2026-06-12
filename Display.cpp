@@ -7,6 +7,7 @@
 #include "Controls.h"
 #include "Sequencer.h"
 #include "SampleStore.h"
+#include "Sampler.h"
 
 DisplayClass Display;
 
@@ -90,13 +91,24 @@ void DisplayClass::draw() {
     }
   }
 
-  // --- status line: selected voice + octave ---
-  char st[26];
-  snprintf(st, sizeof(st), "V%u %s  oct%+d", editState.voice + 1,
-           SampleStore.name(pattern.voices[editState.voice].sampleId),
-           editState.octaveShift);
-  oled.setCursor(0, 56);
-  oled.print(st);
+  if (appMode == MODE_SAMPLE_RECORD) {
+    // --- status line: record state + live input level meter ---
+    static const char* const SMP_TAGS[3] = { "rdy", "ARM", "REC" };
+    oled.setCursor(0, 56);
+    oled.print(SMP_TAGS[Sampler.state()]);
+    int lvl = Sampler.level();          // 0..100
+    if (lvl > 100) lvl = 100;
+    oled.drawRect(24, 56, 102, 7, SSD1306_WHITE);
+    if (lvl > 0) oled.fillRect(25, 57, lvl, 5, SSD1306_WHITE);
+  } else {
+    // --- status line: selected voice + octave ---
+    char st[26];
+    snprintf(st, sizeof(st), "V%u %s  oct%+d", editState.voice + 1,
+             SampleStore.name(pattern.voices[editState.voice].sampleId),
+             editState.octaveShift);
+    oled.setCursor(0, 56);
+    oled.print(st);
+  }
 
   // --- flash overlay: inverted box, centered ---
   if (flashUntil) {

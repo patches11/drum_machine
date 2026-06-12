@@ -32,6 +32,9 @@ public:
   // Master volume 1..10 -> headphone volume + PAM8302 lineOutLevel.
   void setVolume(uint8_t vol1to10);
 
+  // Mic preamp gain 0..63 dB (M7 sampling; codec owned here).
+  void setMicGain(uint8_t gainDb);
+
   // Stop any voice currently playing the given sample slot
   // (required before SampleStore::assignRam repoints it).
   void stopVoicesUsing(uint8_t sampleSlot);

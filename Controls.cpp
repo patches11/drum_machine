@@ -6,6 +6,7 @@
 #include "Encoders.h"
 #include "SampleStore.h"
 #include "Display.h"
+#include "Sampler.h"
 
 ControlsClass Controls;
 
@@ -19,7 +20,7 @@ static const Param MODE_BINDINGS[APP_MODE_COUNT][4] = {
   /* MODE_SOUND_EDIT    */ { P_SMPL,  P_TUNE,  P_DECAY,  P_FILT  },
   /* MODE_TEMPO_SWING   */ { P_BPM,   P_SWING, P_SUBDIV, P_ACCNT },
   /* MODE_FEEL          */ { P_VOICE, P_PUSH,  P_NUDGE,  P_HUMAN },
-  /* MODE_SAMPLE_RECORD */ { P_NONE,  P_NONE,  P_NONE,   P_NONE  },  // M7
+  /* MODE_SAMPLE_RECORD */ { P_VOICE, P_MGAIN, P_SMPL,   P_BPM   },
 };
 
 const Param* ControlsClass::bindings(AppMode m) {
@@ -281,11 +282,17 @@ void ControlsClass::actionAdjustHumanize(int delta) {
   uiDirty = true;
 }
 
+void ControlsClass::actionAdjustMicGain(int delta) {
+  int g = (int)globalState.micGain + delta;
+  if (g < 0)  g = 0;
+  if (g > 63) g = 63;
+  AudioEngine.setMicGain((uint8_t)g);
+  uiDirty = true;
+}
+
 void ControlsClass::actionModeNext() {
-  // cycle HOME -> PATTERN -> SOUND -> TEMPO -> FEEL -> HOME
-  // (SAMPLE_RECORD joins the cycle at M7)
-  appMode = (AppMode)(appMode + 1);
-  if (appMode >= MODE_SAMPLE_RECORD) appMode = MODE_HOME;
+  // cycle HOME -> PATTERN -> SOUND -> TEMPO -> FEEL -> RECORD -> HOME
+  appMode = (AppMode)((appMode + 1) % APP_MODE_COUNT);
   Display.flash(MODE_NAMES[appMode]);
   uiDirty = true;
 }
@@ -313,6 +320,7 @@ void ControlsClass::adjustParam(Param p, int d) {
     case P_PUSH:   actionAdjustPushPull(d);     break;
     case P_NUDGE:  actionAdjustNudge(d);        break;
     case P_HUMAN:  actionAdjustHumanize(d);     break;
+    case P_MGAIN:  actionAdjustMicGain(d * 2);  break;
     default: break;
   }
 }
@@ -335,6 +343,7 @@ const char* ControlsClass::paramLabel(Param p) const {
     case P_PUSH:   return "PUSH";
     case P_NUDGE:  return "NUDGE";
     case P_HUMAN:  return "HUMAN";
+    case P_MGAIN:  return "MGAIN";
     default:       return "";
   }
 }
@@ -365,6 +374,7 @@ void ControlsClass::paramValue(Param p, char* buf, size_t n) const {
     case P_NUDGE:  if (st.active) snprintf(buf, n, "%+dms", st.nudge);
                    else           snprintf(buf, n, "-");               break;
     case P_HUMAN:  snprintf(buf, n, "%ums", globalState.humanize);     break;
+    case P_MGAIN:  snprintf(buf, n, "%udB", globalState.micGain);      break;
     default:       buf[0] = 0;                                         break;
   }
 }
@@ -381,6 +391,7 @@ int ControlsClass::paramBar(Param p) const {
     case P_SWING:  return (globalState.swing - 50) * 100 / 25;
     case P_ACCNT:  return globalState.accentBoost * 100 / 50;
     case P_HUMAN:  return globalState.humanize * 100 / 15;
+    case P_MGAIN:  return globalState.micGain * 100 / 63;
     default:       return -1;
   }
 }
@@ -430,6 +441,13 @@ void ControlsClass::handleButton(const ButtonEvent& ev) {
         }
       }
       // BTN_SHIFT: M10
+      break;
+
+    case MODE_SAMPLE_RECORD:
+      if (ev.type == BTN_PRESS) {
+        if (ev.id == BTN_ACCENT)   Sampler.toggleArm();  // arm / cancel / stop
+        else if (ev.id < NUM_KEYS) actionKey(ev.id);     // try the new sound
+      }
       break;
 
     default:

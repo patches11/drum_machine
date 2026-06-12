@@ -35,6 +35,7 @@ public:
   const char*   name(uint8_t slot) const;
   SampleSource  source(uint8_t slot) const;
   uint8_t       slotCount() const { return NUM_SAMPLE_SLOTS; }
+  uint8_t       progmemCount() const;   // PROGMEM kit size; record slots follow
 
   // M7/M9: point a slot at RAM-pool data. Caller must stop any voice
   // playing this slot first (AudioEngine::stopVoicesUsing).

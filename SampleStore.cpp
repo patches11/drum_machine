@@ -33,6 +33,11 @@ const char* SampleStoreClass::name(uint8_t slot) const {
   return slots[slot].name;
 }
 
+uint8_t SampleStoreClass::progmemCount() const {
+  // defined here because only SampleStore.cpp may include kit_default.h
+  return PROGMEM_KIT_COUNT;
+}
+
 SampleSource SampleStoreClass::source(uint8_t slot) const {
   if (slot >= NUM_SAMPLE_SLOTS) return SRC_NONE;
   return slots[slot].source;

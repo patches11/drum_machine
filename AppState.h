@@ -42,6 +42,7 @@ struct GlobalState {
   uint8_t  humanize;        // 0..N ms of gentle, biased jitter
   uint8_t  currentPattern;
   uint8_t  volume;          // 1..10 -> headphone + lineOutLevel (see AudioEngine)
+  uint8_t  micGain;         // 0..63 dB (SGTL5000 mic preamp, M7 sampling)
 };
 
 // UI modes per plan §5 ("Modes (UI)")

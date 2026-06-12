@@ -14,7 +14,7 @@
 //   SOUND_EDIT   : SMPL   TUNE*  DECAY  FILT     (*Enc2 push: coarse/fine)
 //   TEMPO_SWING  : BPM    SWING  SUBDV  ACCNT
 //   FEEL         : VOICE  PUSH   NUDGE  HUMAN
-//   SAMPLE_REC   : (M7)
+//   SAMPLE_REC   : VOICE  MGAIN  SMPL   BPM      (Accent = arm/stop take)
 //
 // Buttons (all modes): TRANSPORT, MODE (next mode), OCTAVE.
 // PATTERN_EDIT: 12 keys enter/remove hits (typewriter advance), ACCENT
@@ -39,6 +39,7 @@ enum Param : uint8_t {
   P_SMPL,  P_TUNE,  P_DECAY, P_FILT,
   P_SWING, P_SUBDIV, P_ACCNT,
   P_PUSH,  P_NUDGE, P_HUMAN,
+  P_MGAIN,
 };
 
 class ControlsClass {
@@ -79,6 +80,7 @@ public:
   void actionAdjustPushPull(int delta);   // voice -20..+20 ms
   void actionAdjustNudge(int delta);      // step  -20..+20 ms
   void actionAdjustHumanize(int delta);   // 0..15 ms
+  void actionAdjustMicGain(int delta);    // M7: mic preamp 0..63 dB
   void actionModeNext();                  // MODE button
 
   // UI needs redraw? (consumes the flag)

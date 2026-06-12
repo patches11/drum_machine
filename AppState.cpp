@@ -34,6 +34,7 @@ void appStateInit() {
   globalState.humanize       = 0;
   globalState.currentPattern = 0;
   globalState.volume         = 6;
+  globalState.micGain        = 36;
 
   appMode = MODE_PATTERN_EDIT;
 
