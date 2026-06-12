@@ -22,10 +22,16 @@ static const uint8_t VOICE_COLOR[NUM_VOICES][3] = {
 static const uint8_t MASTER_BRIGHTNESS = 60;   // out of 255
 
 int LedsClass::index(uint8_t row, uint8_t col) const {
-#if LED_SERPENTINE
+#if LED_STRIP_RGBW
+  // 16-LED bring-up strip: only one row fits, so show the SELECTED
+  // voice's row (press 'v' / turn the voice encoder to inspect others).
+  return (row == editState.voice) ? col : -1;
+#else
+  #if LED_SERPENTINE
   if (row & 1) col = LED_COLS - 1 - col;
-#endif
+  #endif
   return row * LED_COLS + col;
+#endif
 }
 
 void LedsClass::begin() {
@@ -82,7 +88,8 @@ void LedsClass::render(uint8_t playheadStep, bool transportRunning) {
         b = (uint8_t)min(255, b + MASTER_BRIGHTNESS);
       }
 
-      strip.setPixel(this->index(row, col), r, g, b);
+      int ix = this->index(row, col);
+      if (ix >= 0) strip.setPixel(ix, r, g, b);
     }
   }
   strip.show();   // DMA — returns immediately, audio unaffected

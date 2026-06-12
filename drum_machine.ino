@@ -196,17 +196,36 @@ void handleSerial() {
     case 'E': Controls.actionAdjustDecay(+8);       printCursor(); break;
     case 'c': Controls.actionAdjustFilter(-8);      printCursor(); break;
     case 'C': Controls.actionAdjustFilter(+8);      printCursor(); break;
-    case 'w': Controls.actionAdjustSwing(-1);       break;
-    case 'W': Controls.actionAdjustSwing(+1);       break;
-    case 'b': Controls.actionToggleSubdiv();        break;
-    case 'y': Controls.actionAdjustAccentBoost(-4); break;
-    case 'Y': Controls.actionAdjustAccentBoost(+4); break;
-    case 'j': Controls.actionAdjustPushPull(-1);    break;
-    case 'J': Controls.actionAdjustPushPull(+1);    break;
+    case 'w': case 'W':
+      Controls.actionAdjustSwing(cmd == 'w' ? -1 : +1);
+      Serial.print("swing "); Serial.print(globalState.swing);
+      Serial.print("% ("); Serial.print(globalState.swingSubdiv);
+      Serial.println("th)");
+      break;
+    case 'b':
+      Controls.actionToggleSubdiv();
+      Serial.print("swing subdiv ");
+      Serial.print(globalState.swingSubdiv); Serial.println("th");
+      break;
+    case 'y': case 'Y':
+      Controls.actionAdjustAccentBoost(cmd == 'y' ? -4 : +4);
+      Serial.print("accent boost +");
+      Serial.println(globalState.accentBoost);
+      break;
+    case 'j': case 'J':
+      Controls.actionAdjustPushPull(cmd == 'j' ? -1 : +1);
+      Serial.print("push V"); Serial.print(editState.voice + 1);
+      Serial.print(" ");
+      Serial.print(pattern.voices[editState.voice].pushPull);
+      Serial.println("ms");
+      break;
     case 'n': Controls.actionAdjustNudge(-1);       printCursor(); break;
     case 'N': Controls.actionAdjustNudge(+1);       printCursor(); break;
-    case 'h': Controls.actionAdjustHumanize(-1);    break;
-    case 'H': Controls.actionAdjustHumanize(+1);    break;
+    case 'h': case 'H':
+      Controls.actionAdjustHumanize(cmd == 'h' ? -1 : +1);
+      Serial.print("humanize ");
+      Serial.print(globalState.humanize); Serial.println("ms");
+      break;
 
     case '1': case '2': case '3': case '4':
       AudioEngine.trigger(cmd - '1', 127, 0);

@@ -43,10 +43,18 @@
 #define LED_COLS          NUM_STEPS
 #define LED_ROWS          NUM_VOICES
 #define LED_COUNT         (LED_COLS * LED_ROWS)
-// Final grid is assumed RGB (WS2812_GRB). The 16-LED bring-up strip is RGBW;
-// for that strip use WS2812_GRBW and 4 bytes/LED. Confirm with tests/test_leds.
-#define LED_CONFIG        WS2812_GRB
-#define LED_BYTES_PER_LED 3
+// ONE toggle for the strip type:
+//   1 = the 16-LED RGBW bring-up strip currently on the test rig
+//   0 = the final 64-LED RGB grid (WS2812_GRB)
+// Set to 0 when the real grid is wired. Confirm with tests/test_leds.
+#define LED_STRIP_RGBW    1
+#if LED_STRIP_RGBW
+  #define LED_CONFIG        WS2812_GRBW
+  #define LED_BYTES_PER_LED 4
+#else
+  #define LED_CONFIG        WS2812_GRB
+  #define LED_BYTES_PER_LED 3
+#endif
 // 0 = row-major wiring; 1 = serpentine (odd rows reversed). Set after
 // building the grid — tests/test_leds Phase 4 shows which one you have.
 #define LED_SERPENTINE    0
@@ -108,9 +116,15 @@ static const char* const BUTTON_NAMES[BTN_COUNT] = {
 
 // --- Sample RAM pool (recorded + SD-loaded samples) ---------------------------
 // Teensy 3.6: 256 KB RAM total. Keep headroom for audio library + app state.
+// The pool is partitioned into fixed record slots (never individually freed).
 #define SAMPLE_POOL_BYTES   (128 * 1024)
-#define RECORD_SAMPLE_RATE  22050         // halves cost; player corrects pitch
-#define RECORD_MAX_SECONDS  2
+#define NUM_RECORD_SLOTS    4
+#define RECORD_SLOT_SAMPLES (SAMPLE_POOL_BYTES / 2 / NUM_RECORD_SLOTS) // ~0.74 s
+// Recording decimates the 44.1 kHz stream by 2 (pair-averaged): half the RAM,
+// and the ResamplingPlayer's rate correction keeps the pitch right.
+#define RECORD_THRESHOLD    900   // |sample| that starts an armed take (~2.7% FS)
+#define RECORD_TAIL_LEVEL   450   // trailing-trim floor
+#define RECORD_TAIL_PAD     1300  // samples kept past the last loud one (~60 ms)
 
 // --- Feature flags -------------------------------------------------------------
 #define FEATURE_REVERB_SEND  0   // enable only if CPU headroom allows (M8)
