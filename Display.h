@@ -4,9 +4,9 @@
 // Display — SSD1306 modeless 4-column UI (plan §5 "UI / Display").
 //
 // Layout (128x64):
-//   y 0..9   header: mode name | play arrow + BPM (right)
+//   y 0..9   header: mode name | [C]hain + pattern + play arrow + BPM (right)
 //   y 16..   four 32-px columns, one per encoder: label / value / bar
-//   y 56..   status line: selected voice + octave shift
+//   y 56..   status line: selected voice (+ M/S flags) + octave shift
 //   flash(): ~1 s inverted message box (mode/voice/sample changes)
 //
 // Labels and values come from Controls' binding table — the same table

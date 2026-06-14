@@ -5,6 +5,7 @@
 #include "AudioEngine.h"
 #include "Sequencer.h"
 #include "Display.h"
+#include "Storage.h"
 
 SamplerClass Sampler;
 
@@ -32,6 +33,10 @@ static const char* const REC_NAMES[NUM_RECORD_SLOTS] = {
 void SamplerClass::begin() {
   // codec input select + mic gain happen in AudioEngine.begin();
   // nothing to do until a take is armed.
+}
+
+int16_t* SamplerClass::poolSlot(uint8_t n) {
+  return pool[n < NUM_RECORD_SLOTS ? n : 0];
 }
 
 void SamplerClass::toggleArm() {
@@ -168,6 +173,9 @@ void SamplerClass::finish() {
   Serial.println(editState.voice + 1);
   if (!Sequencer.isRunning())
     AudioEngine.trigger(editState.voice, 100, 0);
+
+  // M9: persist the take so it survives a power-cycle (no-op without SD)
+  Storage.saveRecording(recSlot, buf, len, rate);
 
   recSlot = (uint8_t)((recSlot + 1) % NUM_RECORD_SLOTS);
 }

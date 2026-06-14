@@ -46,8 +46,9 @@ public:
   uint32_t timeToNextFireUs() const;
 
   // Queue a pattern switch; applied when the step index wraps to 0
-  // (bar boundary, spec §7). Pattern slots arrive at M10.
+  // (bar boundary, spec §7). 255 = nothing queued (UI shows "P2>P3").
   void requestPatternChange(uint8_t pat) { pendingPattern = pat; }
+  uint8_t pendingPatternSlot() const { return pendingPattern; }
 
 private:
   struct Event {

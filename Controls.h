@@ -9,8 +9,8 @@
 // so the knob labels can never disagree with what the knobs do.
 //
 // Per-mode encoder bindings (Enc1..Enc4 = OLED columns left..right):
-//   HOME/MIX     : VOICE  LEVEL  VOL    BPM
-//   PATTERN_EDIT : STEP   VOICE  VEL    BPM
+//   HOME/MIX     : VOICE  LEVEL  MFILT  VOL      (BPM stays in the header)
+//   PATTERN_EDIT : STEP   VOICE  VEL    PAT      (BPM in TEMPO + header)
 //   SOUND_EDIT   : SMPL   TUNE*  DECAY  FILT     (*Enc2 push: coarse/fine)
 //   TEMPO_SWING  : BPM    SWING  SUBDV  ACCNT
 //   FEEL         : VOICE  PUSH   NUDGE  HUMAN
@@ -20,6 +20,17 @@
 // PATTERN_EDIT: 12 keys enter/remove hits (typewriter advance), ACCENT
 //   held = accented entry / tap = toggle. Other modes: keys play the
 //   selected voice live (no pattern edit).
+//
+// SHIFT layer (M10, any mode — hold SHIFT, press):
+//   keys C..D#  (0..3)  : mute voice 1..4
+//   keys F..G#  (5..8)  : solo voice 1..4
+//   key  A      (9)     : cycle choke group on the selected voice (off/1/2)
+//   key  A#     (10)    : duplicate pattern -> next slot (and go there)
+//   key  B      (11)    : clear the working pattern's hits
+//   TRANSPORT           : tap tempo
+//   MODE                : chain append (current pattern -> song chain)
+//   OCTAVE              : chain on/off
+// SHIFT chords never fall through to pattern editing.
 //
 // Actions are public so the Serial debug bridge (main sketch) can drive
 // the exact same code paths before the matrix/encoders are wired.
@@ -39,7 +50,8 @@ enum Param : uint8_t {
   P_SMPL,  P_TUNE,  P_DECAY, P_FILT,
   P_SWING, P_SUBDIV, P_ACCNT,
   P_PUSH,  P_NUDGE, P_HUMAN,
-  P_MGAIN,
+  P_MGAIN, P_MFILT,
+  P_PAT,
 };
 
 class ControlsClass {
@@ -81,7 +93,20 @@ public:
   void actionAdjustNudge(int delta);      // step  -20..+20 ms
   void actionAdjustHumanize(int delta);   // 0..15 ms
   void actionAdjustMicGain(int delta);    // M7: mic preamp 0..63 dB
+  void actionAdjustMasterFilter(int delta); // M8: master LP sweep 0..127
   void actionModeNext();                  // MODE button
+
+  // --- M10 patterns / song mode / performance ---
+  void actionSelectPattern(int delta);    // running: queued at bar boundary
+  void actionToggleMute(uint8_t v);
+  void actionToggleSolo(uint8_t v);
+  void actionCycleChoke();                // selected voice: off -> 1 -> 2
+  void actionDuplicatePattern();          // copy current -> next slot, go there
+  void actionClearPattern();              // clear hits, keep voice params
+  void actionTapTempo();
+  void actionChainAppend();               // current pattern -> chain end
+  void actionChainToggle();               // song mode on/off
+  void actionChainClear();
 
   // UI needs redraw? (consumes the flag)
   bool consumeDirty();
@@ -95,6 +120,10 @@ private:
   bool    accentUsedAsChord  = false;  // key entered while ACCENT held
   bool    tuneFine           = false;  // SOUND_EDIT Enc2: coarse st / fine ¢
   uint8_t lastVelocity       = 100;    // velocity applied to new hits
+
+  // tap tempo (M10): smoothed interval between taps
+  unsigned long lastTapMs    = 0;
+  unsigned long tapIntervalMs = 0;
 };
 
 extern ControlsClass Controls;

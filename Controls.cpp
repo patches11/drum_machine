@@ -3,6 +3,7 @@
 #include "AppState.h"
 #include "AudioEngine.h"
 #include "Sequencer.h"
+#include "Scheduler.h"
 #include "Encoders.h"
 #include "SampleStore.h"
 #include "Display.h"
@@ -15,8 +16,8 @@ ControlsClass Controls;
 // Display renders labels/values from this same table (never hand-synced).
 
 static const Param MODE_BINDINGS[APP_MODE_COUNT][4] = {
-  /* MODE_HOME          */ { P_VOICE, P_LEVEL, P_VOL,    P_BPM   },
-  /* MODE_PATTERN_EDIT  */ { P_STEP,  P_VOICE, P_VEL,    P_BPM   },
+  /* MODE_HOME          */ { P_VOICE, P_LEVEL, P_MFILT,  P_VOL   },
+  /* MODE_PATTERN_EDIT  */ { P_STEP,  P_VOICE, P_VEL,    P_PAT   },
   /* MODE_SOUND_EDIT    */ { P_SMPL,  P_TUNE,  P_DECAY,  P_FILT  },
   /* MODE_TEMPO_SWING   */ { P_BPM,   P_SWING, P_SUBDIV, P_ACCNT },
   /* MODE_FEEL          */ { P_VOICE, P_PUSH,  P_NUDGE,  P_HUMAN },
@@ -282,6 +283,15 @@ void ControlsClass::actionAdjustHumanize(int delta) {
   uiDirty = true;
 }
 
+void ControlsClass::actionAdjustMasterFilter(int delta) {
+  int f = (int)globalState.masterFilterCut + delta;
+  if (f < 0)   f = 0;
+  if (f > 127) f = 127;
+  globalState.masterFilterCut = (uint8_t)f;
+  AudioEngine.applyMasterParams();   // heard live — no audition needed
+  uiDirty = true;
+}
+
 void ControlsClass::actionAdjustMicGain(int delta) {
   int g = (int)globalState.micGain + delta;
   if (g < 0)  g = 0;
@@ -294,6 +304,155 @@ void ControlsClass::actionModeNext() {
   // cycle HOME -> PATTERN -> SOUND -> TEMPO -> FEEL -> RECORD -> HOME
   appMode = (AppMode)((appMode + 1) % APP_MODE_COUNT);
   Display.flash(MODE_NAMES[appMode]);
+  uiDirty = true;
+}
+
+// ---------------------------------------------------------------------------
+// M10 patterns / song mode / performance
+
+void ControlsClass::actionSelectPattern(int delta) {
+  // turning the knob again while a change is queued moves the QUEUED target
+  uint8_t pend = Scheduler.pendingPatternSlot();
+  int base = (pend != 255) ? pend : globalState.currentPattern;
+  int p = base + (delta < 0 ? -1 : 1);
+  while (p < 0) p += NUM_PATTERN_SLOTS;
+  p %= NUM_PATTERN_SLOTS;
+
+  char msg[16];
+  if (Sequencer.isRunning()) {
+    Scheduler.requestPatternChange((uint8_t)p);   // lands on the downbeat
+    snprintf(msg, sizeof(msg), "P%d next bar", p + 1);
+  } else {
+    Scheduler.requestPatternChange(255);    // cancel any stale queued change
+    patternBankStore();
+    patternBankLoad((uint8_t)p);
+    for (uint8_t v = 0; v < NUM_VOICES; v++) AudioEngine.applyVoiceParams(v);
+    snprintf(msg, sizeof(msg), "P%d", p + 1);
+  }
+  Display.flash(msg);
+  uiDirty = true;
+}
+
+void ControlsClass::actionToggleMute(uint8_t v) {
+  if (v >= NUM_VOICES) return;
+  Voice& vc = pattern.voices[v];
+  vc.mute = !vc.mute;
+  char msg[12];
+  snprintf(msg, sizeof(msg), "V%u %s", v + 1, vc.mute ? "MUTE" : "play");
+  Display.flash(msg);
+  uiDirty = true;
+}
+
+void ControlsClass::actionToggleSolo(uint8_t v) {
+  if (v >= NUM_VOICES) return;
+  Voice& vc = pattern.voices[v];
+  vc.solo = !vc.solo;
+  char msg[12];
+  snprintf(msg, sizeof(msg), "V%u %s", v + 1, vc.solo ? "SOLO" : "unsolo");
+  Display.flash(msg);
+  uiDirty = true;
+}
+
+void ControlsClass::actionCycleChoke() {
+  Voice& vc = pattern.voices[editState.voice];
+  vc.chokeGroup = (uint8_t)((vc.chokeGroup + 1) % 3);   // off -> 1 -> 2
+  char msg[12];
+  if (vc.chokeGroup == 0) snprintf(msg, sizeof(msg), "CHOKE off");
+  else                    snprintf(msg, sizeof(msg), "CHOKE %u", vc.chokeGroup);
+  Display.flash(msg);
+  uiDirty = true;
+}
+
+void ControlsClass::actionDuplicatePattern() {
+  patternBankStore();                       // current edits travel with the copy
+  uint8_t dst = (uint8_t)((globalState.currentPattern + 1) % NUM_PATTERN_SLOTS);
+  patternBank[dst] = pattern;
+  char msg[12];
+  snprintf(msg, sizeof(msg), "copy>P%u", dst + 1);
+  if (Sequencer.isRunning()) {
+    Scheduler.requestPatternChange(dst);    // hop over at the bar boundary
+  } else {
+    Scheduler.requestPatternChange(255);    // cancel any stale queued change
+    patternBankLoad(dst);                   // params identical — no re-apply
+  }
+  Display.flash(msg);
+  uiDirty = true;
+}
+
+void ControlsClass::actionClearPattern() {
+  // hits only — voice sounds/levels/tuning survive (a kid clearing the
+  // grid should not lose the kit they built)
+  for (uint8_t v = 0; v < NUM_VOICES; v++)
+    for (uint8_t s = 0; s < NUM_STEPS; s++) {
+      Step& st = pattern.voices[v].steps[s];
+      st.active = false;
+      st.accent = false;
+      st.pitch  = 0;
+      st.nudge  = 0;
+    }
+  Display.flash("cleared");
+  uiDirty = true;
+}
+
+void ControlsClass::actionTapTempo() {
+  unsigned long now = millis();
+  unsigned long dt  = now - lastTapMs;
+  lastTapMs = now;
+
+  // 250..1500 ms = 40..240 BPM; outside that = first tap of a new series
+  if (dt < 250 || dt > 1500) {
+    tapIntervalMs = 0;
+    Display.flash("TAP...");
+    return;
+  }
+  tapIntervalMs = tapIntervalMs ? (tapIntervalMs * 3 + dt) / 4 : dt;  // smooth
+  int bpm = (int)(60000 / tapIntervalMs);
+  if (bpm < 40)  bpm = 40;
+  if (bpm > 240) bpm = 240;
+  globalState.bpm = (uint16_t)bpm;
+  char msg[12];
+  snprintf(msg, sizeof(msg), "TAP %d", bpm);
+  Display.flash(msg);
+  uiDirty = true;
+}
+
+void ControlsClass::actionChainAppend() {
+  if (chain.count >= CHAIN_MAX) {
+    Display.flash("chain full");
+    return;
+  }
+  chain.entries[chain.count++] = globalState.currentPattern;
+  char msg[14];
+  snprintf(msg, sizeof(msg), "chn+P%u(%u)", globalState.currentPattern + 1,
+           chain.count);
+  Display.flash(msg);
+  uiDirty = true;
+}
+
+void ControlsClass::actionChainToggle() {
+  if (!chain.active) {
+    if (chain.count == 0) {
+      Display.flash("chain empty");
+      return;
+    }
+    // Do NOT pre-advance pos: the scheduler's bar-boundary branch pulls
+    // entries[pos] itself, so bar 0 (start() schedules it immediately)
+    // correctly plays entries[0].
+    chain.pos    = 0;
+    chain.active = true;
+    Display.flash("CHAIN on");
+  } else {
+    chain.active = false;
+    Display.flash("chain off");
+  }
+  uiDirty = true;
+}
+
+void ControlsClass::actionChainClear() {
+  chain.count  = 0;
+  chain.pos    = 0;
+  chain.active = false;
+  Display.flash("chain clr");
   uiDirty = true;
 }
 
@@ -321,6 +480,8 @@ void ControlsClass::adjustParam(Param p, int d) {
     case P_NUDGE:  actionAdjustNudge(d);        break;
     case P_HUMAN:  actionAdjustHumanize(d);     break;
     case P_MGAIN:  actionAdjustMicGain(d * 2);  break;
+    case P_MFILT:  actionAdjustMasterFilter(d * 4); break;
+    case P_PAT:    actionSelectPattern(d);      break;
     default: break;
   }
 }
@@ -344,6 +505,8 @@ const char* ControlsClass::paramLabel(Param p) const {
     case P_NUDGE:  return "NUDGE";
     case P_HUMAN:  return "HUMAN";
     case P_MGAIN:  return "MGAIN";
+    case P_MFILT:  return "MFILT";
+    case P_PAT:    return "PAT";
     default:       return "";
   }
 }
@@ -375,6 +538,21 @@ void ControlsClass::paramValue(Param p, char* buf, size_t n) const {
                    else           snprintf(buf, n, "-");               break;
     case P_HUMAN:  snprintf(buf, n, "%ums", globalState.humanize);     break;
     case P_MGAIN:  snprintf(buf, n, "%udB", globalState.micGain);      break;
+    case P_MFILT:  if (globalState.masterFilterCut >= 127)
+                     snprintf(buf, n, "open");
+                   else
+                     snprintf(buf, n, "%u", globalState.masterFilterCut);
+                   break;
+    case P_PAT: {  // "2>5" while a change is queued; "2/8" otherwise
+                   uint8_t pend = Scheduler.pendingPatternSlot();
+                   if (pend != 255)
+                     snprintf(buf, n, "%u>%u",
+                              globalState.currentPattern + 1, pend + 1);
+                   else
+                     snprintf(buf, n, "%u/%u",
+                              globalState.currentPattern + 1, NUM_PATTERN_SLOTS);
+                   break;
+                }
     default:       buf[0] = 0;                                         break;
   }
 }
@@ -392,6 +570,7 @@ int ControlsClass::paramBar(Param p) const {
     case P_ACCNT:  return globalState.accentBoost * 100 / 50;
     case P_HUMAN:  return globalState.humanize * 100 / 15;
     case P_MGAIN:  return globalState.micGain * 100 / 63;
+    case P_MFILT:  return globalState.masterFilterCut * 100 / 127;
     default:       return -1;
   }
 }
@@ -417,6 +596,27 @@ void ControlsClass::handleEncoderPush(uint8_t encIdx) {
 }
 
 void ControlsClass::handleButton(const ButtonEvent& ev) {
+  // SHIFT layer (M10) — checked FIRST so SHIFT+TRANSPORT is tap tempo,
+  // not transport. SHIFT chords never fall through to pattern editing.
+  if (InputMatrix.isHeld(BTN_SHIFT) && ev.id != BTN_SHIFT) {
+    if (ev.type == BTN_PRESS) {
+      switch (ev.id) {
+        case BTN_KEY_C: case BTN_KEY_CS: case BTN_KEY_D: case BTN_KEY_DS:
+          actionToggleMute((uint8_t)(ev.id - BTN_KEY_C));      break;
+        case BTN_KEY_F: case BTN_KEY_FS: case BTN_KEY_G: case BTN_KEY_GS:
+          actionToggleSolo((uint8_t)(ev.id - BTN_KEY_F));      break;
+        case BTN_KEY_A:     actionCycleChoke();                break;
+        case BTN_KEY_AS:    actionDuplicatePattern();          break;
+        case BTN_KEY_B:     actionClearPattern();              break;
+        case BTN_TRANSPORT: actionTapTempo();                  break;
+        case BTN_MODE:      actionChainAppend();               break;
+        case BTN_OCTAVE:    actionChainToggle();               break;
+        default: break;
+      }
+    }
+    return;
+  }
+
   // global buttons, any mode
   if (ev.type == BTN_PRESS) {
     switch (ev.id) {
@@ -440,7 +640,6 @@ void ControlsClass::handleButton(const ButtonEvent& ev) {
           actionToggleAccent();         // tap (no key chorded) = toggle
         }
       }
-      // BTN_SHIFT: M10
       break;
 
     case MODE_SAMPLE_RECORD:

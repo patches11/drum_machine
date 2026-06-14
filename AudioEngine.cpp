@@ -3,6 +3,7 @@
 #include "AudioEngine.h"
 #include "ResamplingPlayer.h"
 #include "SampleStore.h"
+#include "Compressor.h"
 
 AudioEngineClass AudioEngine;
 
@@ -13,6 +14,12 @@ static ResamplingPlayer         players[NUM_VOICES];
 static AudioEffectEnvelope      envelopes[NUM_VOICES];
 static AudioFilterStateVariable filters[NUM_VOICES];
 static AudioMixer4              mixer;
+static AudioMixer4              masterBus;      // ch0 = dry mix, ch1 = reverb
+#if FEATURE_REVERB_SEND
+static AudioEffectFreeverb      reverb;
+#endif
+static AudioFilterStateVariable masterFilter;   // performance sweep (M8)
+static AudioEffectLimiter       limiter;        // safety floor (M8)
 static AudioOutputI2S           i2sOut;
 static AudioControlSGTL5000     sgtl5000;
 
@@ -29,12 +36,22 @@ static AudioConnection pV0c(filters[0], 0, mixer, 0);
 static AudioConnection pV1c(filters[1], 0, mixer, 1);
 static AudioConnection pV2c(filters[2], 0, mixer, 2);
 static AudioConnection pV3c(filters[3], 0, mixer, 3);
+// master chain: mixer -> masterBus -> sweep filter -> limiter -> I2S
+static AudioConnection pMixBus(mixer, 0, masterBus, 0);
+#if FEATURE_REVERB_SEND
+static AudioConnection pRevIn(mixer, 0, reverb, 0);
+static AudioConnection pRevOut(reverb, 0, masterBus, 1);
+#endif
+static AudioConnection pBusFilt(masterBus, 0, masterFilter, 0);
+static AudioConnection pFiltLim(masterFilter, 0, limiter, 0);
 // mono: same mix to both channels (plan §4 — single speaker, lose nothing)
-static AudioConnection pOutL(mixer, 0, i2sOut, 0);
-static AudioConnection pOutR(mixer, 0, i2sOut, 1);
+static AudioConnection pOutL(limiter, 0, i2sOut, 0);
+static AudioConnection pOutR(limiter, 0, i2sOut, 1);
 
-// Per-channel headroom: 4 voices summing at full scale must not clip.
-static const float VOICE_GAIN = 0.55f;
+// Per-channel headroom: lower than the pre-M8 0.55 — the limiter's MAKEUP
+// gain (Compressor.cpp) restores loudness, so coincident hits ride into
+// the limiter instead of hard-clipping in the mixer's int16 sum.
+static const float VOICE_GAIN = 0.45f;
 
 // Which sample slot each voice is currently sounding (for stopVoicesUsing)
 static uint8_t playingSlot[NUM_VOICES] = {255, 255, 255, 255};
@@ -69,6 +86,18 @@ void AudioEngineClass::begin() {
     applyVoiceParams(v);
     mixer.gain(v, 0.0f);         // silent until first trigger sets velocity
   }
+
+  // master chain
+  masterBus.gain(0, 1.0f);
+#if FEATURE_REVERB_SEND
+  reverb.roomsize(0.7f);
+  reverb.damping(0.5f);
+  setReverbSend(globalState.reverbSend);
+#else
+  masterBus.gain(1, 0.0f);
+#endif
+  masterFilter.resonance(0.9f);  // a little bite when swept; limiter catches
+  applyMasterParams();
 }
 
 void AudioEngineClass::applyVoiceParams(uint8_t v) {
@@ -133,6 +162,22 @@ void AudioEngineClass::setMicGain(uint8_t gainDb) {
   sgtl5000.micGain(gainDb);
 }
 
+void AudioEngineClass::applyMasterParams() {
+  masterFilter.frequency(cutToHz(globalState.masterFilterCut));
+}
+
+void AudioEngineClass::setLimiterBypass(bool b) { limiter.bypass(b); }
+bool AudioEngineClass::limiterBypassed()        { return limiter.bypassed(); }
+
+#if FEATURE_REVERB_SEND
+void AudioEngineClass::setReverbSend(uint8_t send) {
+  if (send > 127) send = 127;
+  globalState.reverbSend = send;
+  // 0..127 -> 0..0.8 wet on the master bus
+  masterBus.gain(1, (float)send / 127.0f * 0.8f);
+}
+#endif
+
 void AudioEngineClass::printUsage() {
   Serial.print("CPU: ");
   Serial.print(AudioProcessorUsage(), 1);
@@ -145,9 +190,20 @@ void AudioEngineClass::printUsage() {
   Serial.print(" of ");
   Serial.print(AUDIO_MEM_BLOCKS);
   Serial.println(")");
+  Serial.print("Limiter: ");
+  if (limiter.bypassed()) {
+    Serial.println("BYPASSED");
+  } else {
+    Serial.print("GR ");
+    Serial.print(limiter.reductionDb(), 1);
+    Serial.print(" dB (max ");
+    Serial.print(limiter.reductionDbMax(), 1);
+    Serial.println(")");
+  }
 }
 
 void AudioEngineClass::resetUsageMax() {
   AudioProcessorUsageMaxReset();
   AudioMemoryUsageMaxReset();
+  limiter.resetMax();
 }

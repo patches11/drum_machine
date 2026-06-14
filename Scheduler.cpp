@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "Scheduler.h"
 #include "AudioEngine.h"
+#include "Display.h"
 
 SchedulerClass Scheduler;
 
@@ -62,7 +63,17 @@ bool SchedulerClass::tick() {
   // (1) Schedule every step whose grid time enters the lookahead window.
   uint32_t horizon = now + lookaheadUs();
   while ((int32_t)((uint32_t)nextStepTimeUs - horizon) <= 0) {
-    if (nextStepIndex == 0) applyPendingPatternChange();   // bar boundary
+    if (nextStepIndex == 0) {                              // bar boundary
+      // Song mode (M10): the chain feeds the next slot, one entry per bar
+      // — unless a manual change is already queued (it wins this bar and
+      // the chain position holds). On start() this branch runs immediately,
+      // so bar 0 plays entries[0]; the toggle must not pre-advance pos.
+      if (pendingPattern == 255 && chain.active && chain.count > 0) {
+        pendingPattern = chain.entries[chain.pos];
+        chain.pos = (uint8_t)((chain.pos + 1) % chain.count);
+      }
+      applyPendingPatternChange();
+    }
     scheduleStep(nextStepIndex, (uint32_t)nextStepTimeUs);
     nextStepIndex   = (nextStepIndex + 1) % pattern.length;
     nextStepTimeUs += (double)stepUs;                      // double: no drift
@@ -132,10 +143,16 @@ void SchedulerClass::enqueue(uint32_t fireUs, uint8_t v, uint8_t vel,
   AudioEngine.trigger(v, vel, pitch);
 }
 
+// Swap the working pattern at the bar boundary (spec §7). Called from
+// tick() in loop context — not an ISR — so a struct copy + param refresh
+// here is safe. Edits made this bar ride along via patternBankStore().
 void SchedulerClass::applyPendingPatternChange() {
   if (pendingPattern == 255) return;
-  globalState.currentPattern = pendingPattern;   // slots arrive at M10
+  patternBankStore();                      // keep edits to the outgoing slot
+  patternBankLoad(pendingPattern);
+  for (uint8_t v = 0; v < NUM_VOICES; v++) AudioEngine.applyVoiceParams(v);
   pendingPattern = 255;
+  Display.markDirty();
 }
 
 bool SchedulerClass::isSilencedBySolo(uint8_t voice) const {

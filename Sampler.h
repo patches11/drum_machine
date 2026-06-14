@@ -34,6 +34,10 @@ public:
   SamplerState state() const { return st; }
   uint8_t      level() const { return lastLevel; }  // input meter 0..100
 
+  // M9: Storage loads /SAMPLES/RECn.WAV into the pool partitions at boot
+  // (capacity per partition = RECORD_SLOT_SAMPLES).
+  int16_t* poolSlot(uint8_t n);
+
 private:
   void cancel();
   void finish();

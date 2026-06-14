@@ -2,6 +2,8 @@
 #include <string.h>
 
 Pattern     pattern;
+Pattern     patternBank[NUM_PATTERN_SLOTS];
+ChainState  chain;
 GlobalState globalState;
 AppMode     appMode = MODE_PATTERN_EDIT;   // boot straight into editing (M3)
 EditState   editState;
@@ -35,10 +37,28 @@ void appStateInit() {
   globalState.currentPattern = 0;
   globalState.volume         = 6;
   globalState.micGain        = 36;
+  globalState.masterFilterCut = 127;   // open
+  globalState.reverbSend      = 0;
 
   appMode = MODE_PATTERN_EDIT;
 
   editState.cursor      = 0;
   editState.voice       = 0;
   editState.octaveShift = 0;
+
+  // every bank slot starts as a copy of the default pattern — switching to
+  // an untouched slot gives a playable kit, never garbage
+  for (uint8_t i = 0; i < NUM_PATTERN_SLOTS; i++) patternBank[i] = pattern;
+
+  memset(&chain, 0, sizeof(chain));
+}
+
+void patternBankStore() {
+  patternBank[globalState.currentPattern] = pattern;
+}
+
+void patternBankLoad(uint8_t slot) {
+  if (slot >= NUM_PATTERN_SLOTS) return;
+  globalState.currentPattern = slot;
+  pattern = patternBank[slot];
 }

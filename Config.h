@@ -112,7 +112,9 @@ static const char* const BUTTON_NAMES[BTN_COUNT] = {
 // --- Storage -----------------------------------------------------------------
 #define SD_CS_PIN         BUILTIN_SDCARD  // Teensy 3.6 onboard SDIO slot
 #define EEPROM_MAGIC      0xD2A7          // GlobalState validity marker
-#define EEPROM_VERSION    1
+#define EEPROM_VERSION    2               // v2: blob grew ChainState (M10)
+#define NUM_PATTERN_SLOTS 8               // /PATTERNS/PAT0..7.DAT
+#define CHAIN_MAX         16              // song-mode chain entries (M10)
 
 // --- Sample RAM pool (recorded + SD-loaded samples) ---------------------------
 // Teensy 3.6: 256 KB RAM total. Keep headroom for audio library + app state.
@@ -127,7 +129,13 @@ static const char* const BUTTON_NAMES[BTN_COUNT] = {
 #define RECORD_TAIL_PAD     1300  // samples kept past the last loud one (~60 ms)
 
 // --- Feature flags -------------------------------------------------------------
-#define FEATURE_REVERB_SEND  0   // enable only if CPU headroom allows (M8)
+// FEATURE_REVERB_SEND: 1 compiles a Freeverb send on the master bus
+// ('V' over Serial cycles wet 0/32/64/96). Freeverb costs real CPU on the
+// 3.6 — flip it on, run the worst-case pattern, and check 'u' stays <70%.
+#define FEATURE_REVERB_SEND  0
+// FEATURE_DELAY_SEND: not implemented. AudioEffectDelay eats ~1 audio
+// block per 2.9 ms of delay line (300 ms = ~104 blocks > AUDIO_MEM_BLOCKS);
+// needs its own memory plan. Revisit at M10 if wanted.
 #define FEATURE_DELAY_SEND   0
 
 #endif // CONFIG_H

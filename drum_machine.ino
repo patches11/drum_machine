@@ -4,8 +4,9 @@
 // Wiring only: setup() initializes modules, loop() pumps them.
 // All logic lives in the module .h/.cpp files. Specs in the .md docs.
 //
-// Milestone status: M7 (mic sampling — record, trim, normalize, sequence).
-//   The old hardware-test-rig sketch is preserved at tests/test_rig/.
+// Milestone status: M10 (pattern slots, song chain, mute/solo, choke,
+//   copy/clear, tap tempo). The old hardware-test-rig sketch is preserved
+//   at tests/test_rig/.
 //
 // Serial commands (115200) — the editing commands call the SAME Controls
 // actions the matrix/encoders do, so milestones are verifiable before
@@ -36,6 +37,20 @@
 //   h H  : humanize -1 / +1 ms
 //   q    : sampler arm / cancel / stop  (RECORD mode; = Accent button there)
 //   i I  : mic gain -2 / +2 dB
+//   t T  : master filter sweep -8 / +8  (127 = open)
+//   L    : limiter bypass A/B           (GR readout lives in 'u')
+//   V    : reverb wet cycle             (only if FEATURE_REVERB_SEND)
+//   S    : save ALL patterns -> SD + globals/chain -> EEPROM
+//   l    : reload patterns from SD      (globals restore at boot)
+//   P    : next pattern slot            (running: queued, lands on downbeat)
+//   M    : mute selected voice          (= Shift+key C..D# for V1..4)
+//   O    : solo selected voice          (= Shift+key F..G# for V1..4)
+//   Q    : cycle choke group off/1/2    (= Shift+A)
+//   D    : duplicate pattern -> next slot (= Shift+A#)
+//   K    : tap tempo (tap 'K' to the beat; = Shift+Transport)
+//   Z    : chain append current pattern (= Shift+Mode)
+//   B    : chain on/off                 (= Shift+Octave)
+//   0    : chain clear
 //   1..4 : trigger voice 1-4 manually at full velocity
 //   a    : trigger ALL voices (headroom test)
 //   +/-  : master volume (1..10)
@@ -49,12 +64,14 @@
 #include "AudioEngine.h"
 #include "Clock.h"
 #include "Sequencer.h"
+#include "Scheduler.h"
 #include "Leds.h"
 #include "InputMatrix.h"
 #include "Encoders.h"
 #include "Controls.h"
 #include "Display.h"
 #include "Sampler.h"
+#include "Storage.h"
 
 static bool ledsDirty = true;
 
@@ -85,17 +102,6 @@ void loadDemoPattern() {
   ledsDirty = true;
   Display.markDirty();
   Serial.println("demo pattern loaded");
-}
-
-void clearPattern() {
-  for (uint8_t v = 0; v < NUM_VOICES; v++)
-    for (uint8_t s = 0; s < NUM_STEPS; s++) {
-      pattern.voices[v].steps[s].active = false;
-      pattern.voices[v].steps[s].accent = false;
-    }
-  ledsDirty = true;
-  Display.markDirty();
-  Serial.println("pattern cleared");
 }
 
 void printCursor() {
@@ -134,16 +140,18 @@ void setup() {
   while (!Serial && millis() < 3000) {}
 
   appStateInit();
-  SampleStore.begin();
+  Storage.loadGlobals();         // EEPROM — before AudioEngine reads volume
+  SampleStore.begin();           // PROGMEM kit first: ALWAYS boots with sounds
   AudioEngine.begin();
   Sampler.begin();               // mic chain (codec set up by AudioEngine)
+  Storage.begin();               // SD probe: RECn.WAV -> pool, pattern file
   Display.begin();               // AFTER AudioEngine: codec owns I2C init
   Leds.begin();
   InputMatrix.begin();
   Encoders.begin();
   Sequencer.begin(&INTERNAL_CLOCK);
 
-  Serial.println("=== drum machine (M7) ===");
+  Serial.println("=== drum machine (M10) ===");
   Serial.print("Kit:");
   for (uint8_t v = 0; v < NUM_VOICES; v++) {
     Serial.print(" ");
@@ -156,6 +164,8 @@ void setup() {
   Serial.println("A=accent o=oct ()=pitch rR=tune fF=fine s=smpl gG=lvl eE=dcy cC=filt");
   Serial.println("wW=swing b=subdiv yY=accboost jJ=push nN=nudge hH=human 1-4 a +/- u z");
   Serial.println("q=rec-arm iI=micgain (sampling: m to RECORD mode, q, make a sound)");
+  Serial.println("tT=master-filter L=limiter-A/B (GR in 'u') S=save-all l=load-all");
+  Serial.println("P=pattern M=mute O=solo Q=choke D=dup K=tap Z=chain+ B=chain-on/off 0=chain-clr");
 }
 
 void handleSerial() {
@@ -169,7 +179,8 @@ void handleSerial() {
       break;
     case 'm': Controls.actionModeNext(); break;
     case 'd': loadDemoPattern(); break;
-    case 'x': clearPattern(); break;
+    case 'x': Controls.actionClearPattern();
+              Serial.println("pattern cleared"); break;
     case '[': Controls.actionAdjustTempo(-5);
               Serial.print("tempo "); Serial.println(globalState.bpm); break;
     case ']': Controls.actionAdjustTempo(+5);
@@ -246,6 +257,103 @@ void handleSerial() {
       Serial.print(globalState.micGain); Serial.println("dB");
       break;
 
+    // --- M8 master chain bridge ---
+    case 't': case 'T':
+      Controls.actionAdjustMasterFilter(cmd == 't' ? -8 : +8);
+      Serial.print("master filter ");
+      if (globalState.masterFilterCut >= 127) Serial.println("open");
+      else Serial.println(globalState.masterFilterCut);
+      break;
+    case 'L':
+      AudioEngine.setLimiterBypass(!AudioEngine.limiterBypassed());
+      Serial.println(AudioEngine.limiterBypassed()
+                     ? "limiter BYPASSED (hard clamp)" : "limiter ON");
+      break;
+
+    // --- M9 persistence bridge ---
+    case 'S':
+      Serial.println(Storage.savePatterns()
+                     ? "saved (patterns->SD, globals+chain->EEPROM)"
+                     : "save failed (no SD?)");
+      break;
+    case 'l':
+      if (Storage.loadPatterns()) {
+        ledsDirty = true;
+        Display.markDirty();
+      } else {
+        Serial.println("load failed (no SD / no files / corrupt)");
+      }
+      break;
+
+    // --- M10 patterns / song mode / performance bridge ---
+    case 'P': {
+      Controls.actionSelectPattern(+1);
+      uint8_t pend = Scheduler.pendingPatternSlot();
+      if (pend != 255) {
+        Serial.print("pattern P");
+        Serial.print(pend + 1);
+        Serial.println(" queued - lands on the next downbeat");
+      } else {
+        Serial.print("pattern P");
+        Serial.println(globalState.currentPattern + 1);
+      }
+      break;
+    }
+    case 'M': Controls.actionToggleMute(editState.voice);
+              Serial.print("V"); Serial.print(editState.voice + 1);
+              Serial.println(pattern.voices[editState.voice].mute
+                             ? " MUTED" : " unmuted");
+              break;
+    case 'O': Controls.actionToggleSolo(editState.voice);
+              Serial.print("V"); Serial.print(editState.voice + 1);
+              Serial.println(pattern.voices[editState.voice].solo
+                             ? " SOLO" : " unsolo");
+              break;
+    case 'Q': Controls.actionCycleChoke();
+              Serial.print("V"); Serial.print(editState.voice + 1);
+              Serial.print(" choke group ");
+              Serial.println(pattern.voices[editState.voice].chokeGroup);
+              break;
+    case 'D': {
+      Controls.actionDuplicatePattern();
+      // stopped: we're already in the copy; running: it's queued
+      uint8_t pend = Scheduler.pendingPatternSlot();
+      Serial.print("duplicated -> P");
+      Serial.print((pend != 255 ? pend : globalState.currentPattern) + 1);
+      Serial.println(pend != 255 ? " (next bar)" : "");
+      break;
+    }
+    case 'K': Controls.actionTapTempo();
+              Serial.print("tap: bpm "); Serial.println(globalState.bpm);
+              break;
+    case 'Z': {
+      Controls.actionChainAppend();
+      Serial.print("chain [");
+      for (uint8_t i = 0; i < chain.count; i++) {
+        if (i) Serial.print(" ");
+        Serial.print("P");
+        Serial.print(chain.entries[i] + 1);
+      }
+      Serial.println("]");
+      break;
+    }
+    case 'B': Controls.actionChainToggle();
+              Serial.println(chain.active ? "CHAIN ON (one entry per bar)"
+                                          : "chain off");
+              break;
+    case '0': Controls.actionChainClear();
+              Serial.println("chain cleared");
+              break;
+#if FEATURE_REVERB_SEND
+    case 'V': {
+      uint8_t s = globalState.reverbSend + 32;
+      if (s > 96) s = 0;
+      AudioEngine.setReverbSend(s);
+      Serial.print("reverb send "); Serial.println(s);
+      break;
+    }
+#endif
+
     case '1': case '2': case '3': case '4':
       AudioEngine.trigger(cmd - '1', 127, 0);
       break;
@@ -274,6 +382,7 @@ void loop() {
   Controls.update();
   handleSerial();
   Sampler.update();              // drain record queue + input level meter
+  Storage.update();              // debounced EEPROM globals autosave
   if (Controls.consumeDirty()) {
     ledsDirty = true;
     Display.markDirty();

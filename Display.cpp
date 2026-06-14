@@ -60,11 +60,14 @@ void DisplayClass::draw() {
   oled.setTextSize(1);
   oled.setTextColor(SSD1306_WHITE);
 
-  // --- header: mode | play arrow + BPM ---
+  // --- header: mode | [C]hain flag + pattern + play arrow + BPM ---
   oled.setCursor(0, 0);
   oled.print(MODE_TITLES[appMode]);
-  char hdr[12];
-  snprintf(hdr, sizeof(hdr), "%s%u", Sequencer.isRunning() ? "> " : "",
+  char hdr[14];
+  snprintf(hdr, sizeof(hdr), "%sP%u %s%u",
+           chain.active ? "C" : "",
+           globalState.currentPattern + 1,
+           Sequencer.isRunning() ? ">" : "",
            globalState.bpm);
   oled.setCursor(128 - (int)strlen(hdr) * 6, 0);
   oled.print(hdr);
@@ -101,11 +104,14 @@ void DisplayClass::draw() {
     oled.drawRect(24, 56, 102, 7, SSD1306_WHITE);
     if (lvl > 0) oled.fillRect(25, 57, lvl, 5, SSD1306_WHITE);
   } else {
-    // --- status line: selected voice + octave ---
+    // --- status line: selected voice (+ M/S flags) + octave ---
+    const Voice& vc = pattern.voices[editState.voice];
+    char flags[4] = "";
+    if (vc.mute) strlcat(flags, "M", sizeof(flags));
+    if (vc.solo) strlcat(flags, "S", sizeof(flags));
     char st[26];
-    snprintf(st, sizeof(st), "V%u %s  oct%+d", editState.voice + 1,
-             SampleStore.name(pattern.voices[editState.voice].sampleId),
-             editState.octaveShift);
+    snprintf(st, sizeof(st), "V%u%s %s oct%+d", editState.voice + 1,
+             flags, SampleStore.name(vc.sampleId), editState.octaveShift);
     oled.setCursor(0, 56);
     oled.print(st);
   }

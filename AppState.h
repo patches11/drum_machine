@@ -43,6 +43,19 @@ struct GlobalState {
   uint8_t  currentPattern;
   uint8_t  volume;          // 1..10 -> headphone + lineOutLevel (see AudioEngine)
   uint8_t  micGain;         // 0..63 dB (SGTL5000 mic preamp, M7 sampling)
+  uint8_t  masterFilterCut; // 0..127 master LP sweep, 127 = open (M8)
+  uint8_t  reverbSend;      // 0..127 wet amount; only if FEATURE_REVERB_SEND
+};
+
+// Song-mode chain (M10): an ordered list of pattern slots the scheduler
+// steps through, one entry per bar. Persisted in EEPROM with the globals
+// (entries/count survive a power-cycle; `active` always boots false —
+// the machine never wakes up mid-song).
+struct ChainState {
+  uint8_t entries[CHAIN_MAX];  // pattern slot per bar
+  uint8_t count;               // 0 = empty
+  uint8_t pos;                 // next entry to play (advanced by Scheduler)
+  bool    active;              // chain playback engaged?
 };
 
 // UI modes per plan §5 ("Modes (UI)")
@@ -63,12 +76,20 @@ struct EditState {
   int8_t  octaveShift;  // -1/0/+1 octaves applied to key entry (M4)
 };
 
-extern Pattern     pattern;
+extern Pattern     pattern;       // the WORKING pattern (edited + played)
+extern Pattern     patternBank[NUM_PATTERN_SLOTS];  // M10 slot storage
+extern ChainState  chain;
 extern GlobalState globalState;
 extern AppMode     appMode;
 extern EditState   editState;
 
 // Reset everything to power-on defaults (called before EEPROM/SD restore).
 void appStateInit();
+
+// M10 pattern slots: edits always happen in `pattern`; store writes it back
+// to its bank slot, load pulls a slot into `pattern` (and sets
+// globalState.currentPattern). Callers re-apply voice params after a load.
+void patternBankStore();
+void patternBankLoad(uint8_t slot);
 
 #endif // APPSTATE_H

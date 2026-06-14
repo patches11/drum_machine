@@ -45,9 +45,17 @@ static inline uint8_t scale(uint8_t c, uint16_t num, uint16_t den) {
 }
 
 void LedsClass::render(uint8_t playheadStep, bool transportRunning) {
+  // M10 mute/solo: a silenced row (muted, or unsoloed while another voice
+  // solos) shows its hits ghost-dim — you can see the pattern is still
+  // there, and that it isn't sounding.
+  bool anySolo = false;
+  for (uint8_t v = 0; v < NUM_VOICES; v++)
+    if (pattern.voices[v].solo) { anySolo = true; break; }
+
   for (uint8_t row = 0; row < LED_ROWS; row++) {
     const Voice& vc = pattern.voices[row];
     bool selectedRow = (row == editState.voice);
+    bool silenced    = vc.mute || (anySolo && !vc.solo);
     for (uint8_t col = 0; col < LED_COLS; col++) {
       const Step& st = vc.steps[col];
       uint8_t r = 0, g = 0, b = 0;
@@ -56,10 +64,11 @@ void LedsClass::render(uint8_t playheadStep, bool transportRunning) {
         // brightness = velocity (plan §5); accent pushes toward white
         uint16_t vel = st.velocity;
         if (vel < 24) vel = 24;                       // keep dim hits visible
+        if (silenced) vel = 16;                       // ghost-dim, no accent
         r = scale(VOICE_COLOR[row][0], vel, 127);
         g = scale(VOICE_COLOR[row][1], vel, 127);
         b = scale(VOICE_COLOR[row][2], vel, 127);
-        if (st.accent) {
+        if (st.accent && !silenced) {
           r = (uint8_t)min(255, r + 40);
           g = (uint8_t)min(255, g + 40);
           b = (uint8_t)min(255, b + 40);

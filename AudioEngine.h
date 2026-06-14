@@ -6,8 +6,9 @@
 // Graph per drum_machine_software_plan.md §4:
 //   voice[0..3]: player -> AudioEffectEnvelope -> AudioFilterStateVariable(LP)
 //                -> mixer channel
-//   mixer -> mono out (same signal to both I2S channels)
-//   (master compressor/limiter inserts at M8; FX sends optional later)
+//   mixer -> masterBus -> master sweep filter -> limiter -> mono out
+//   (same signal to both I2S channels; M8 master chain — see Compressor.h.
+//    Freeverb send onto masterBus ch1 behind FEATURE_REVERB_SEND.)
 //
 // M4: voices are ResamplingPlayer (resampling_player_spec.md) — trigger()
 // computes playbackRate = 2^((stepPitch + rootSemis)/12) * 2^(fineCents/1200)
@@ -34,6 +35,18 @@ public:
 
   // Mic preamp gain 0..63 dB (M7 sampling; codec owned here).
   void setMicGain(uint8_t gainDb);
+
+  // M8: push globalState.masterFilterCut into the master sweep filter.
+  void applyMasterParams();
+
+  // M8: limiter A/B for the Serial bridge ('L'). GR shows in printUsage().
+  void setLimiterBypass(bool b);
+  bool limiterBypassed();
+
+#if FEATURE_REVERB_SEND
+  // M8: master reverb wet amount 0..127 (flag-gated; check CPU with 'u').
+  void setReverbSend(uint8_t send);
+#endif
 
   // Stop any voice currently playing the given sample slot
   // (required before SampleStore::assignRam repoints it).
